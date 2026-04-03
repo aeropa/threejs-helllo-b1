@@ -1,11 +1,20 @@
 import * as THREE from 'three';
 
+// --- MOBILE BROWSER PROTECTIONS ---
+// Prevent zooming, scrolling, and pull-to-refresh on mobile
+document.body.style.margin = '0';
+document.body.style.overflow = 'hidden';
+document.body.style.touchAction = 'none'; // Critical for mobile games
+document.body.style.backgroundColor = '#222';
+document.body.style.userSelect = 'none';
+document.body.style.webkitUserSelect = 'none';
+
 // --- GAME SETTINGS & STATE ---
 const BOARD_SIZE = 9;
 const COLORS = [
     0xff0000, // Red
     0x00ff00, // Green
-    0x0000ff, // Blue
+    0x0088ff, // Light Blue (easier to see on dark bg)
     0xffff00, // Yellow
     0x00ffff, // Cyan
     0xff00ff, // Magenta
@@ -17,15 +26,18 @@ let visualBoard = Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fil
 let selectedCell = null;
 let score = 0;
 
-// --- UI SETUP ---
+// --- UI SETUP (MOBILE OPTIMIZED) ---
 const scoreDiv = document.createElement('div');
 scoreDiv.style.position = 'absolute';
-scoreDiv.style.top = '20px';
-scoreDiv.style.left = '20px';
+scoreDiv.style.top = '5%';
+scoreDiv.style.width = '100%';
+scoreDiv.style.textAlign = 'center';
 scoreDiv.style.color = 'white';
 scoreDiv.style.fontFamily = 'Arial, sans-serif';
-scoreDiv.style.fontSize = '24px';
+scoreDiv.style.fontSize = '32px'; // Larger for mobile
+scoreDiv.style.fontWeight = 'bold';
 scoreDiv.style.pointerEvents = 'none';
+scoreDiv.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)';
 scoreDiv.innerText = `Score: ${score}`;
 document.body.appendChild(scoreDiv);
 
@@ -33,29 +45,25 @@ document.body.appendChild(scoreDiv);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x222222);
 
-// Position camera to look down at an angle over the board
-const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(4, 9, 10);
-camera.lookAt(4, 0, 4);
-
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Save battery on high-res phones
 document.body.appendChild(renderer.domElement);
 
 // Lighting
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
 scene.add(ambientLight);
 const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-dirLight.position.set(5, 10, 5);
+dirLight.position.set(5, 15, 5);
 scene.add(dirLight);
 
-// Geometries
+// Geometries & Materials
 const tileGeo = new THREE.BoxGeometry(0.95, 0.1, 0.95);
-const tileMat = new THREE.MeshStandardMaterial({ color: 0x444444 });
-const tileMatSelected = new THREE.MeshStandardMaterial({ color: 0x888888 });
+const tileMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+const tileMatSelected = new THREE.MeshStandardMaterial({ color: 0xaaaaaa });
 const ballGeo = new THREE.SphereGeometry(0.4, 32, 32);
 
-// Array to hold clickable tiles for Raycasting
 const clickableTiles = [];
 
 // --- INITIALIZE BOARD ---
@@ -63,15 +71,34 @@ for (let x = 0; x < BOARD_SIZE; x++) {
     for (let z = 0; z < BOARD_SIZE; z++) {
         const tile = new THREE.Mesh(tileGeo, tileMat);
         tile.position.set(x, 0, z);
-        tile.userData = { x, z }; // Store grid coordinates in the mesh
+        tile.userData = { x, z };
         scene.add(tile);
         clickableTiles.push(tile);
     }
 }
 
+// --- DYNAMIC CAMERA FRAMING FOR PORTRAIT ---
+function updateCamera() {
+    const aspect = window.innerWidth / window.innerHeight;
+    camera.aspect = aspect;
+    
+    // If the screen is narrow (portrait), pull the camera higher up so the 9x9 board fits
+    if (aspect < 1) {
+        camera.position.set(4, 14 + (1 / aspect) * 2, 9); 
+    } else {
+        // Landscape fallback
+        camera.position.set(4, 10, 9);
+    }
+    
+    camera.lookAt(4, 0, 4); // Look at the exact center of the 9x9 board
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+window.addEventListener('resize', updateCamera);
+updateCamera(); // Call once to set initial view
+
 // --- GAME LOGIC ---
 
-// Spawn random balls
 function spawnBalls(count) {
     let emptyCells = [];
     for (let x = 0; x < BOARD_SIZE; x++) {
@@ -80,9 +107,8 @@ function spawnBalls(count) {
         }
     }
 
-    if (emptyCells.length === 0) return false; // Game Over
+    if (emptyCells.length === 0) return false;
 
-    // Shuffle and pick
     emptyCells.sort(() => Math.random() - 0.5);
     let spawned = Math.min(count, emptyCells.length);
 
@@ -90,25 +116,25 @@ function spawnBalls(count) {
         let { x, z } = emptyCells[i];
         let colorIndex = Math.floor(Math.random() * COLORS.length);
         
-        // Logical
-        logicalBoard[x][z] = colorIndex + 1; // 1-7 (0 is empty)
+        logicalBoard[x][z] = colorIndex + 1;
         
-        // Visual
-        let ballMat = new THREE.MeshStandardMaterial({ color: COLORS[colorIndex], roughness: 0.2 });
+        let ballMat = new THREE.MeshStandardMaterial({ color: COLORS[colorIndex], roughness: 0.1, metalness: 0.3 });
         let ball = new THREE.Mesh(ballGeo, ballMat);
         ball.position.set(x, 0.5, z);
+        
+        // Pop-in animation scale
+        ball.scale.set(0, 0, 0);
         scene.add(ball);
         visualBoard[x][z] = ball;
     }
     
-    return emptyCells.length > count; // Return false if board is completely full
+    return emptyCells.length > count;
 }
 
-// Pathfinding (Breadth-First Search)
 function hasPath(startX, startZ, endX, endZ) {
     let queue = [{ x: startX, z: startZ }];
     let visited = new Set([`${startX},${startZ}`]);
-    const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]]; // Up, down, left, right
+    const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
 
     while (queue.length > 0) {
         let curr = queue.shift();
@@ -127,10 +153,9 @@ function hasPath(startX, startZ, endX, endZ) {
     return false;
 }
 
-// Check for 5 in a row and clear them
 function checkAndClearLines() {
     let toClear = new Set();
-    const dirs = [[1, 0], [0, 1], [1, 1], [1, -1]]; // Right, Down, Diagonal Right, Diagonal Left
+    const dirs = [[1, 0], [0, 1], [1, 1], [1, -1]];
 
     for (let x = 0; x < BOARD_SIZE; x++) {
         for (let z = 0; z < BOARD_SIZE; z++) {
@@ -162,95 +187,87 @@ function checkAndClearLines() {
             logicalBoard[x][z] = 0;
         });
         
-        // Update Score (Base score + bonus for extra balls)
         score += toClear.size * 2 + (toClear.size - 5) * 5;
         scoreDiv.innerText = `Score: ${score}`;
-        return true; // Match found
+        return true;
     }
-    return false; // No match found
+    return false;
 }
 
-// --- INTERACTION (RAYCASTING) ---
+// --- TOUCH & MOUSE INTERACTION ---
 const raycaster = new THREE.Raycaster();
-const mouse = new THREE.Vector2();
+const pointer = new THREE.Vector2();
 
-window.addEventListener('pointerdown', (event) => {
-    // Convert mouse position to normalized device coordinates (-1 to +1)
-    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+function onPointerDown(event) {
+    // pointerdown covers both touch and mouse clicks natively
+    pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
+    pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
-    raycaster.setFromCamera(mouse, camera);
+    raycaster.setFromCamera(pointer, camera);
     const intersects = raycaster.intersectObjects(clickableTiles);
 
     if (intersects.length > 0) {
         const { x, z } = intersects[0].object.userData;
 
         if (logicalBoard[x][z] !== 0) {
-            // 1. Clicked a ball -> Select it
             selectedCell = { x, z };
         } else if (selectedCell && logicalBoard[x][z] === 0) {
-            // 2. Clicked empty space while ball is selected -> Try to move
             if (hasPath(selectedCell.x, selectedCell.z, x, z)) {
                 
-                // Move logical
                 logicalBoard[x][z] = logicalBoard[selectedCell.x][selectedCell.z];
                 logicalBoard[selectedCell.x][selectedCell.z] = 0;
                 
-                // Move visual
                 let ball = visualBoard[selectedCell.x][selectedCell.z];
                 ball.position.set(x, 0.5, z);
                 visualBoard[x][z] = ball;
                 visualBoard[selectedCell.x][selectedCell.z] = null;
                 
-                selectedCell = null; // Deselect
+                selectedCell = null;
 
-                // Game logic cycle: Check matches -> Spawn if no matches -> Check matches again
                 if (!checkAndClearLines()) {
                     if (!spawnBalls(3)) {
-                        scoreDiv.innerText = `GAME OVER - Final Score: ${score}`;
+                        scoreDiv.innerHTML = `GAME OVER<br>Score: ${score}`;
                     } else {
-                        checkAndClearLines(); // Check if spawning caused a match
+                        checkAndClearLines();
                     }
                 }
             }
         }
     }
-});
+}
+window.addEventListener('pointerdown', onPointerDown);
 
 // --- RENDER LOOP ---
 function animate() {
     requestAnimationFrame(animate);
 
-    // Visual feedback: Highlight the tile of the selected ball and make it bounce
     clickableTiles.forEach(tile => tile.material = tileMat);
+    
+    // Animate newly spawned balls popping in
+    for (let x = 0; x < BOARD_SIZE; x++) {
+        for (let z = 0; z < BOARD_SIZE; z++) {
+            let ball = visualBoard[x][z];
+            if (ball) {
+                if (ball.scale.x < 1) {
+                    ball.scale.addScalar(0.1); // Pop-in growth
+                }
+                ball.position.y = 0.5; // Ensure resting position
+            }
+        }
+    }
+
+    // Highlight and bounce selected ball
     if (selectedCell) {
         let index = selectedCell.x * BOARD_SIZE + selectedCell.z;
         clickableTiles[index].material = tileMatSelected;
         
-        // Gentle bounce animation
         let ball = visualBoard[selectedCell.x][selectedCell.z];
-        if (ball) ball.position.y = 0.5 + Math.abs(Math.sin(Date.now() * 0.005)) * 0.3;
-    }
-    
-    // Ensure unselected balls rest firmly on the board
-    for(let x=0; x<BOARD_SIZE; x++){
-        for(let z=0; z<BOARD_SIZE; z++){
-            if(visualBoard[x][z] && (!selectedCell || selectedCell.x !== x || selectedCell.z !== z)) {
-                visualBoard[x][z].position.y = 0.5;
-            }
-        }
+        if (ball) ball.position.y = 0.5 + Math.abs(Math.sin(Date.now() * 0.008)) * 0.3;
     }
 
     renderer.render(scene, camera);
 }
 
-// Handle Window Resizing
-window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-});
-
 // Start game
-spawnBalls(5); // Start with 5 balls
+spawnBalls(5);
 animate();
