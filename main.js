@@ -1,55 +1,86 @@
 import * as THREE from 'three';
+// Import OrbitControls from the Three.js add-ons folder
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // --- MOBILE BROWSER PROTECTIONS ---
-// Prevent zooming, scrolling, and pull-to-refresh on mobile
 document.body.style.margin = '0';
 document.body.style.overflow = 'hidden';
-document.body.style.touchAction = 'none'; // Critical for mobile games
-document.body.style.backgroundColor = '#222';
+document.body.style.touchAction = 'none'; 
+document.body.style.backgroundColor = '#111';
 document.body.style.userSelect = 'none';
 document.body.style.webkitUserSelect = 'none';
 
 // --- GAME SETTINGS & STATE ---
 const BOARD_SIZE = 9;
 const COLORS = [
-    0xff0000, // Red
-    0x00ff00, // Green
-    0x0088ff, // Light Blue (easier to see on dark bg)
-    0xffff00, // Yellow
-    0x00ffff, // Cyan
-    0xff00ff, // Magenta
-    0xff8800  // Orange
+    0xff0000, 0x00ff00, 0x0088ff, 0xffff00, 
+    0x00ffff, 0xff00ff, 0xff8800
 ];
 
 let logicalBoard = Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(0));
 let visualBoard = Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(null));
 let selectedCell = null;
 let score = 0;
+let isAnimating = false; // Prevents clicking while a ball is moving
 
-// --- UI SETUP (MOBILE OPTIMIZED) ---
+// --- UI SETUP ---
+const uiContainer = document.createElement('div');
+uiContainer.style.position = 'absolute';
+uiContainer.style.top = '10px';
+uiContainer.style.width = '100%';
+uiContainer.style.display = 'flex';
+uiContainer.style.flexDirection = 'column';
+uiContainer.style.alignItems = 'center';
+uiContainer.style.gap = '10px';
+uiContainer.style.pointerEvents = 'none';
+uiContainer.style.fontFamily = 'Arial, sans-serif';
+document.body.appendChild(uiContainer);
+
 const scoreDiv = document.createElement('div');
-scoreDiv.style.position = 'absolute';
-scoreDiv.style.top = '5%';
-scoreDiv.style.width = '100%';
-scoreDiv.style.textAlign = 'center';
 scoreDiv.style.color = 'white';
-scoreDiv.style.fontFamily = 'Arial, sans-serif';
-scoreDiv.style.fontSize = '32px'; // Larger for mobile
+scoreDiv.style.fontSize = '32px';
 scoreDiv.style.fontWeight = 'bold';
-scoreDiv.style.pointerEvents = 'none';
 scoreDiv.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)';
 scoreDiv.innerText = `Score: ${score}`;
-document.body.appendChild(scoreDiv);
+uiContainer.appendChild(scoreDiv);
+
+// Lock Checkbox UI
+const lockContainer = document.createElement('label');
+lockContainer.style.pointerEvents = 'auto'; // Allow clicking the checkbox
+lockContainer.style.color = '#00ffff';
+lockContainer.style.fontSize = '18px';
+lockContainer.style.display = 'flex';
+lockContainer.style.alignItems = 'center';
+lockContainer.style.gap = '8px';
+lockContainer.style.background = 'rgba(0,0,0,0.5)';
+lockContainer.style.padding = '8px 16px';
+lockContainer.style.borderRadius = '20px';
+lockContainer.innerHTML = `<input type="checkbox" id="cameraLock" checked style="transform: scale(1.5);"> Lock Camera`;
+uiContainer.appendChild(lockContainer);
 
 // --- THREE.JS SETUP ---
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x222222);
+scene.background = new THREE.Color(0x111111);
 
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Save battery on high-res phones
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 document.body.appendChild(renderer.domElement);
+
+// Setup Orbit Controls (Zooming / Panning)
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(4, 0, 4); // Set focus to center of the 9x9 board
+controls.enableDamping = true;
+controls.maxDistance = 25; // Max zoom out
+controls.minDistance = 3;  // Max zoom in
+controls.maxPolarAngle = Math.PI / 2 - 0.1; // Don't let camera go below ground
+controls.enabled = false; // Start locked (because checkbox is checked)
+
+// Listen to Lock Checkbox
+document.getElementById('cameraLock').addEventListener('change', (e) => {
+    controls.enabled = !e.target.checked;
+});
 
 // Lighting
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
@@ -58,15 +89,15 @@ const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
 dirLight.position.set(5, 15, 5);
 scene.add(dirLight);
 
-// Geometries & Materials
+// Geometries
 const tileGeo = new THREE.BoxGeometry(0.95, 0.1, 0.95);
-const tileMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
-const tileMatSelected = new THREE.MeshStandardMaterial({ color: 0xaaaaaa });
+const tileMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+const tileMatSelected = new THREE.MeshStandardMaterial({ color: 0x666666 });
 const ballGeo = new THREE.SphereGeometry(0.4, 32, 32);
 
 const clickableTiles = [];
 
-// --- INITIALIZE BOARD ---
+// --- INITIALIZE BOARD & NEON GRID ---
 for (let x = 0; x < BOARD_SIZE; x++) {
     for (let z = 0; z < BOARD_SIZE; z++) {
         const tile = new THREE.Mesh(tileGeo, tileMat);
@@ -77,25 +108,27 @@ for (let x = 0; x < BOARD_SIZE; x++) {
     }
 }
 
-// --- DYNAMIC CAMERA FRAMING FOR PORTRAIT ---
+// Add bright cyan grid lines!
+// 9x9 grid, sized 9 units, cyan color
+const gridHelper = new THREE.GridHelper(BOARD_SIZE, BOARD_SIZE, 0x00ffff, 0x00ffff);
+gridHelper.position.set(4, 0.06, 4); // Place slightly above the tile surfaces
+scene.add(gridHelper);
+
+// --- DYNAMIC CAMERA FRAMING ---
 function updateCamera() {
     const aspect = window.innerWidth / window.innerHeight;
     camera.aspect = aspect;
-    
-    // If the screen is narrow (portrait), pull the camera higher up so the 9x9 board fits
     if (aspect < 1) {
-        camera.position.set(4, 14 + (1 / aspect) * 2, 9); 
+        camera.position.set(4, 13 + (1 / aspect) * 2, 9); // Portrait
     } else {
-        // Landscape fallback
-        camera.position.set(4, 10, 9);
+        camera.position.set(4, 9, 8); // Landscape
     }
-    
-    camera.lookAt(4, 0, 4); // Look at the exact center of the 9x9 board
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    controls.update();
 }
 window.addEventListener('resize', updateCamera);
-updateCamera(); // Call once to set initial view
+updateCamera();
 
 // --- GAME LOGIC ---
 
@@ -115,42 +148,40 @@ function spawnBalls(count) {
     for (let i = 0; i < spawned; i++) {
         let { x, z } = emptyCells[i];
         let colorIndex = Math.floor(Math.random() * COLORS.length);
-        
         logicalBoard[x][z] = colorIndex + 1;
         
         let ballMat = new THREE.MeshStandardMaterial({ color: COLORS[colorIndex], roughness: 0.1, metalness: 0.3 });
         let ball = new THREE.Mesh(ballGeo, ballMat);
         ball.position.set(x, 0.5, z);
-        
-        // Pop-in animation scale
-        ball.scale.set(0, 0, 0);
+        ball.scale.set(0, 0, 0); // Start tiny for pop-in animation
         scene.add(ball);
         visualBoard[x][z] = ball;
     }
-    
     return emptyCells.length > count;
 }
 
-function hasPath(startX, startZ, endX, endZ) {
-    let queue = [{ x: startX, z: startZ }];
+// NEW: BFS that returns the actual array of coordinates for the path
+function findPath(startX, startZ, endX, endZ) {
+    let queue = [{ x: startX, z: startZ, path: [] }];
     let visited = new Set([`${startX},${startZ}`]);
     const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
 
     while (queue.length > 0) {
-        let curr = queue.shift();
-        if (curr.x === endX && curr.z === endZ) return true;
+        let { x, z, path } = queue.shift();
+        
+        if (x === endX && z === endZ) return path;
 
         for (let [dx, dz] of dirs) {
-            let nx = curr.x + dx, nz = curr.z + dz;
+            let nx = x + dx, nz = z + dz;
             if (nx >= 0 && nx < BOARD_SIZE && nz >= 0 && nz < BOARD_SIZE) {
                 if (logicalBoard[nx][nz] === 0 && !visited.has(`${nx},${nz}`)) {
                     visited.add(`${nx},${nz}`);
-                    queue.push({ x: nx, z: nz });
+                    queue.push({ x: nx, z: nz, path: [...path, { x: nx, z: nz }] });
                 }
             }
         }
     }
-    return false;
+    return null; // No path found
 }
 
 function checkAndClearLines() {
@@ -186,7 +217,6 @@ function checkAndClearLines() {
             visualBoard[x][z] = null;
             logicalBoard[x][z] = 0;
         });
-        
         score += toClear.size * 2 + (toClear.size - 5) * 5;
         scoreDiv.innerText = `Score: ${score}`;
         return true;
@@ -194,12 +224,57 @@ function checkAndClearLines() {
     return false;
 }
 
-// --- TOUCH & MOUSE INTERACTION ---
+// --- ANIMATION SYSTEM ---
+function animateBallAlongPath(ball, path, onComplete) {
+    let step = 0;
+    const speed = 0.25; // The higher, the faster the ball moves
+
+    function moveFrame() {
+        if (step >= path.length) {
+            onComplete();
+            return;
+        }
+
+        let target = path[step];
+        let dx = target.x - ball.position.x;
+        let dz = target.z - ball.position.z;
+        let distance = Math.sqrt(dx * dx + dz * dz);
+
+        if (distance < speed) {
+            // Snap to grid point and target next step
+            ball.position.x = target.x;
+            ball.position.z = target.z;
+            step++;
+        } else {
+            // Move steadily towards the target node
+            ball.position.x += (dx / distance) * speed;
+            ball.position.z += (dz / distance) * speed;
+        }
+        
+        requestAnimationFrame(moveFrame);
+    }
+    moveFrame();
+}
+
+
+// --- INTERACTION (DRAG vs CLICK DETECTION) ---
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
+let pointerDownPosition = { x: 0, y: 0 };
 
-function onPointerDown(event) {
-    // pointerdown covers both touch and mouse clicks natively
+// Track where the pointer starts
+window.addEventListener('pointerdown', (event) => {
+    pointerDownPosition = { x: event.clientX, y: event.clientY };
+});
+
+// Execute action on pointer up ONLY if we didn't drag the screen
+window.addEventListener('pointerup', (event) => {
+    if (isAnimating) return; // Block input while ball is rolling
+
+    // Check if user dragged (for panning/zooming) rather than tapped
+    const moveDist = Math.hypot(event.clientX - pointerDownPosition.x, event.clientY - pointerDownPosition.y);
+    if (moveDist > 10) return; 
+
     pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
     pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
@@ -212,46 +287,60 @@ function onPointerDown(event) {
         if (logicalBoard[x][z] !== 0) {
             selectedCell = { x, z };
         } else if (selectedCell && logicalBoard[x][z] === 0) {
-            if (hasPath(selectedCell.x, selectedCell.z, x, z)) {
-                
+            
+            // Get the route!
+            const path = findPath(selectedCell.x, selectedCell.z, x, z);
+            
+            if (path) {
+                isAnimating = true; // Lock interaction
+
+                // Update Logic Board immediately
                 logicalBoard[x][z] = logicalBoard[selectedCell.x][selectedCell.z];
                 logicalBoard[selectedCell.x][selectedCell.z] = 0;
                 
                 let ball = visualBoard[selectedCell.x][selectedCell.z];
-                ball.position.set(x, 0.5, z);
                 visualBoard[x][z] = ball;
                 visualBoard[selectedCell.x][selectedCell.z] = null;
                 
-                selectedCell = null;
-
-                if (!checkAndClearLines()) {
-                    if (!spawnBalls(3)) {
-                        scoreDiv.innerHTML = `GAME OVER<br>Score: ${score}`;
-                    } else {
-                        checkAndClearLines();
+                let oldCell = selectedCell;
+                selectedCell = null; // Clear selection highlight
+                
+                // Start physical animation
+                animateBallAlongPath(ball, path, () => {
+                    // When animation finishes, check rules:
+                    isAnimating = false;
+                    if (!checkAndClearLines()) {
+                        if (!spawnBalls(3)) {
+                            scoreDiv.innerHTML = `GAME OVER<br>Score: ${score}`;
+                        } else {
+                            checkAndClearLines();
+                        }
                     }
-                }
+                });
             }
         }
     }
-}
-window.addEventListener('pointerdown', onPointerDown);
+});
 
 // --- RENDER LOOP ---
 function animate() {
     requestAnimationFrame(animate);
+    
+    controls.update(); // Required for damping/smooth camera movements
 
     clickableTiles.forEach(tile => tile.material = tileMat);
     
-    // Animate newly spawned balls popping in
+    // Animate pop-in of new balls and ensure rest are steady
     for (let x = 0; x < BOARD_SIZE; x++) {
         for (let z = 0; z < BOARD_SIZE; z++) {
             let ball = visualBoard[x][z];
             if (ball) {
-                if (ball.scale.x < 1) {
-                    ball.scale.addScalar(0.1); // Pop-in growth
+                if (ball.scale.x < 1) ball.scale.addScalar(0.08); // Growth
+                
+                // Only reset Y position if it's not the selected ball
+                if (!selectedCell || selectedCell.x !== x || selectedCell.z !== z) {
+                    ball.position.y = 0.5; 
                 }
-                ball.position.y = 0.5; // Ensure resting position
             }
         }
     }
@@ -262,7 +351,9 @@ function animate() {
         clickableTiles[index].material = tileMatSelected;
         
         let ball = visualBoard[selectedCell.x][selectedCell.z];
-        if (ball) ball.position.y = 0.5 + Math.abs(Math.sin(Date.now() * 0.008)) * 0.3;
+        if (ball && !isAnimating) {
+            ball.position.y = 0.5 + Math.abs(Math.sin(Date.now() * 0.008)) * 0.3;
+        }
     }
 
     renderer.render(scene, camera);
