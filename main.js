@@ -47,7 +47,7 @@ uiContainer.appendChild(scoreDiv);
 // Lock Checkbox UI
 const lockContainer = document.createElement('label');
 lockContainer.style.pointerEvents = 'auto'; // Allow clicking the checkbox
-lockContainer.style.color = '#00ffff';
+lockContainer.style.color = '#f0f0f0';
 lockContainer.style.fontSize = '18px';
 lockContainer.style.display = 'flex';
 lockContainer.style.alignItems = 'center';
@@ -110,7 +110,7 @@ for (let x = 0; x < BOARD_SIZE; x++) {
 
 // Add bright cyan grid lines!
 // 9x9 grid, sized 9 units, cyan color
-const gridHelper = new THREE.GridHelper(BOARD_SIZE, BOARD_SIZE, 0x00ffff, 0x00ffff);
+const gridHelper = new THREE.GridHelper(BOARD_SIZE, BOARD_SIZE, 0x808080, 0x808080);
 gridHelper.position.set(4, 0.06, 4); // Place slightly above the tile surfaces
 scene.add(gridHelper);
 
